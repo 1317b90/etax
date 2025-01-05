@@ -1,2 +1,4 @@
-DrissionPage
+DrissionPage==4.1.0.14
 ddddocr
+redis
+Pillow

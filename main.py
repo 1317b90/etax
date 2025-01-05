@@ -1,269 +1,127 @@
-# 导入
-import random
+import json
+import os
+import traceback
+
+import make_invoice 
+import tell
+import redis
 import time
-from DrissionPage import Chromium
-import ddddocr
-import Error
-from DrissionPage.common import Settings
-from DrissionPage.common import Keys
+import get_invoice_code
+import Config
 
-#设置找不到元素时，抛出异常
-Settings.raise_when_ele_not_found = True
-#设置点击失败时，抛出异常
-Settings.raise_when_click_failed = True
-#设置等待失败时，抛出异常
-Settings.raise_when_wait_failed = True
-#设置单例化标签页对象
-Settings.singleton_tab_obj = True
+# 创建 Redis 连接
+r = redis.Redis(host=Config.REDIS_URL, port=Config.REDIS_DB, db=0)
 
-
-# 完成登录验证
-def login_yzm(det,tab,is_save=False):
-    # 获取验证码元素
-    dialog_ele = tab.ele('@class=el-dialog__body')
-
-    # 验证码背景
-    yzm_eles = dialog_ele.eles('@tag()=img')
-
-    move_x=0
-
-    if len(yzm_eles) != 2:
-        print('验证码获取失败')
-        return False
-
-    for i in range(len(yzm_eles)):
-        # 获取验证码背景和缺口,最多等待十秒
-        yzm_eles[i]=yzm_eles[i].src(timeout=10)
-
-    if is_save:
-        with open('./files/yzm_bg.jpg', 'wb') as f:
-            f.write(yzm_eles[0])
-        with open('./files/yzm_gap.png', 'wb') as f:
-            f.write(yzm_eles[1])
-    
-    res = det.slide_match(yzm_eles[1],yzm_eles[0])
-    move_x=res['target'][0]
-
-
-    # 滑块按钮
-    slider_ele = dialog_ele.ele('@class=slide-verify-slider-mask-item-icon')
-
-    # 拖拽滑块
-    slider_ele.drag(move_x, 0, random.uniform(0.3, 0.8))
-
-    # 先查询是否存在警告
+def main(data:dict):    
     try:
-        message_ele=tab.ele('@class=el-message__content',timeout=2)
-        raise Error.LoginError(message_ele.text)
-    except:
-        pass
-
-
-    # 不报错，说明按钮存在，则没通过验证
-    try:
-        dialog_ele.ele('@class=slide-verify-slider-mask-item-icon',timeout=1)
-        return False
-    except:
-        return True
-
-# ——————————登录————————————————————登录————————————————————登录————————————————————登录————————————————————登录————————————————————登录——————————
-def login(det,tab,uscid,username,password,is_refresh=False):
-    
-        
-    if is_refresh:
-        # 刷新页面
-        tab.refresh()
-        # 等待页面加载完成
-        tab.wait.load_start() 
-
-    try:
-        # 获取登录元素
-        login_ele = tab.ele('@class=formContentE')
-        # 获取登录元素中的表单元素
-        login_ele = login_ele.ele('@class=el-form')
-        input_eles = login_ele.eles('.el-input__inner') 
-
-        input_content = (uscid,username,password)
-
-        # 依次填写税号、账号、密码
-        for i in range(len(input_eles)):
-            # 输入内容
-            input_eles[i].input(input_content[i])
-            
-        # 获取登录按钮
-        login_button=login_ele.ele('@tag()=button')
-        
-        # 点击登录按钮
-        login_button.click()
-
-        # 尝试登录验证码
-        # 如果验证码验证失败，再试一次
-        if not login_yzm(det,tab):
-            return False
-        
-        # 验证成功
-        else:
-            return True
-
+        tell.ing_task(data['task_id'])
+        make_invoice.main(**data)
     except Exception as e:
-        # 判断是否为指定的登录错误
-        if isinstance(e, Error.LoginError):
-            raise e
-        # 如果是其他的错误，重试就可以了
+        error=str(e)
+        if error=="开票完成":
+            file_path="./files/invoice.pdf"
+            file_name=f'{data["invoice_name"]}_金额:{data["invoice_amount"]}_{data["buy_name"]}_{time.strftime("%Y%m%d%H%M")}.pdf'
+            file_url=tell.up_file(file_path,file_name)
+            msg="开票已成功，请查收以下文件，如有任何问题，请随时联系我。"
+
+            # 发送邮件
+            if data.get("buy_email","")!="":
+                try:
+                    tell.send_email(data['buy_email'],file_path,file_name,data["invoice_name"],data['company_name'])
+                    msg=f"开票已成功，发票文件已发送至您客户的邮箱 {data['buy_email']}。请查收以下文件，如有任何问题，请随时联系我。"
+                except Exception as e:
+                    tell.send_message("admin_flx",str(e))
+
+            # 上传成功了就把文件删掉
+            os.remove(file_path)
+            tell.send_message(data['wecome_id'],msg)
+            tell.send_message(data['wecome_id'],file_url,"file")
+            tell.done_task(data['task_id'],True,"开票成功",file_url)
+            tell.set_task_data(data['wecome_id'],{})
+
+        elif error=="发票预览":
+            file_name=f'{data["invoice_name"]}_金额:{data["invoice_amount"]}_{data["buy_name"]}_{time.strftime("%Y%m%d%H%M")}.jpg'
+            file_url=tell.up_file("./files/preview.jpg",file_name)
+            os.remove("./files/preview.jpg")
+            tell.send_message(data['wecome_id'],"您好！这是您发票的预览，请您确认一下是否存在问题。如果没问题，我将继续为您开具发票。感谢！")
+            tell.send_message(data['wecome_id'],file_url,"file")
+            tell.done_task(data['task_id'],True,"发票预览",file_url)
+
+        elif error=="需查询编码":
+            invoice_code_data=get_invoice_code.main(data['invoice_name'],is_image=True)
+
+            invoice_data=tell.get_task_data(data['wecome_id'])
+            invoice_data['table']=invoice_code_data
+            tell.set_task_data(data['wecome_id'],invoice_data)
+            file_url=tell.up_file("./files/table.png","table.png")
+            os.remove("./files/table.png")
+            tell.send_message(data['wecome_id'],f"您的开票项目：#{data['invoice_name']}，发票编码名称尚未确定。\n请您根据下表选择一个合适的编码名称，并将对应的序号或编码回复给我。感谢您的配合！")
+            tell.send_message(data['wecome_id'],file_url,"file")
+            tell.done_task(data['task_id'],False,"需查询编码",file_url)
+            
+        elif "登录失败：" in error:
+            tell.send_message(data['wecome_id'],"登录失败了")
+            tell.done_task(data['task_id'],False,"登录失败",data['wecome_phone'])
+            tell.set_task_data(data['wecome_id'],{})
+
+        # 重试 重试 重试 重试
+        elif error == "多次登录失败" or "没有找到元素" in error or "超时" in error or "等待元素" in error or "等待页面" in error or "该元素没有位置及大小" in error:
+            
+            return error
+
         else:
-            print("登录失败：",str(e))
-            return False
+            tell.send_message(data['wecome_id'],"出错了："+error)
+            tell.done_task(data['task_id'],False,"出错",error)
+            tell.set_task_data(data['wecome_id'],{})
+            print(f"任务执行失败：{error}")
 
 
 if __name__ == "__main__":
-    uscid = "91440101MA5CR0FL12"
-    username = "13922232205"
-    password = "Xia3331068."
-    invoice_type="普通发票"
-    # invoice_type="增值税专用发票"
-    is_person=True
+    for i in range(0x1f600,0x1f650):
+        print(chr(i),end=" ")
+        if i%16==15:
+            print()
 
-    # 购买方信息
-    buy_name="张三"
-    buy_id="1234567890"
-    buy_address="广州市天河区"
-    buy_phone="13922232205"
-    buy_bank_name="中国银行"
-    buy_bank_id="1234567890"
+    while True:
+        # BRPOP 会阻塞直到队列中有任务
+        task = r.brpop('make_invoice')
+        if task:
+            task_data = task[1].decode('utf-8')  # 获取任务内容
+            print(time.strftime("%Y-%m-%d %H:%M:%S"))
+            print(task_data)
+            try:
+                task_data = json.loads(task_data)
+            except:
+                print("输入数据解析失败",task_data)
+                continue
 
-    # 销售方信息
-    sell_bank_name="中国银行"
-    sell_bank_id="1234567890"
+            # 补充id，避免网站发起时出错
+            task_data['wecome_id']=task_data.get("wecome_id","")
+            task_data['task_id']=task_data.get("task_id","")
 
+            try:
+                # 执行主函数，最多重试三次
+                result_sum=""
+                result = main(task_data)
+                for _ in range(Config.MAIN_RETRY):
+                    # 出现重试，间隔10秒后重试
+                    if result is not None:
+                        result = main(task_data)
+                        if result is not None:
+                            result_sum += result
+                            Config.wait()
+                            Config.TIMEWAIT*=2
+                            print(f"遇到错误：{result}，进行重试，当前等待时间：{Config.TIMEWAIT}秒")
+                    else:
+                        break
+                    
+                if result is not None:
+                    tell.send_message(task_data['wecome_id'],"尊敬的用户，抱歉，由于电子税务局网络波动较大，多次尝试开票仍然失败。请您稍后大约10分钟再试，感谢您的理解与耐心！")
+                    tell.done_task(task_data['task_id'],False,"多次重试后失败",result_sum)
+                    tell.set_task_data(task_data['wecome_id'],{})
 
-    # ——————————加载页面————————————————————加载页面————————————————————加载页面————————————————————加载页面————————————————————加载页面——————————
-    # 连接浏览器
-    browser = Chromium()  
-    # 获取标签页对象
-    tab = browser.latest_tab  
-    # 访问网页
-    tab.get('https://etax.guangdong.chinatax.gov.cn:8443/')  
-    # 获取文本框元素对象
-    ele = tab.ele('@class=loginBtnText')
-
-    ele.click()
-
-    # 等待页面加载完成
-    tab.wait.load_start() 
-
-    # ——————————登录————————————————————登录————————————————————登录————————————————————登录————————————————————登录————————————————————登录——————————
-    det = ddddocr.DdddOcr(det=False, ocr=False)
-
-    MAX_LOGIN_ATTEMPTS = 8
-    
-    for attempt in range(MAX_LOGIN_ATTEMPTS):
-        # 第一次登录不刷新页面，后续登录需要刷新
-        is_refresh = attempt > 0
-        
-        if login(det, tab, uscid, username, password, is_refresh):
-            break
-    else:
-        raise Exception("多次登录失败")
-    
-    # 
-
-    # 登录成功了，点击办税员
-    # dialog_ele = tab.ele('.el-dialog')
-
-    radio_group_ele = tab.ele('@class=el-radio-group')
-    riadio_label_eles=radio_group_ele.eles('.el-radio__label')
-
-    for riadio_label_ele in riadio_label_eles:
-        if riadio_label_ele.text == '办税员':
-            riadio_label_ele.click()
-            break
-    else:
-        raise Exception("没有找到办税员")
-
-    # 接着点击确定
-    tab.ele('tag:span@@text()=确认').click()
-
-    tab.wait.load_start() 
-
-    # 访问立即开票页面
-    tab.get('https://dppt.guangdong.chinatax.gov.cn:8443/blue-invoice-makeout')
-
-    tab.wait.load_start() 
-    
-    # 点击立即开票
-    tab.wait.eles_loaded('.quick-entrance')
-    quick_entrance_ele=tab.ele('@class=quick-entrance')
-    quick_choose_ele=quick_entrance_ele.ele('@class=invoice-entrance-choose__content txc rdu2')
-    quick_choose_ele.click()
-    
-    # 等待票类选择框出现
-    tab.wait.eles_loaded('@class=t-dialog__body')
-
-    # 按4次TAB，到选择票类
-    for _ in range(4):
-        tab.actions.key_down('TAB')
-
-    if invoice_type == "普通发票":
-        tab.actions.key_down('DOWN')
-        tab.actions.key_down('DOWN')
-    elif invoice_type == "增值税专用发票":
-        tab.actions.key_down('DOWN')
-        # 增值税发票不可选自然人
-        is_person=False
-
-    else:
-        raise Exception("发票类型错误")
-    
-    # 按下回车 选择票类
-    tab.actions.key_down('ENTER')
-
-    # 按5次TAB切换到确定按钮
-    for _ in range(5):
-        tab.actions.key_down('TAB')
-
-    # 按下确定按钮
-    tab.actions.key_down('ENTER')
-
-    # 等待表单页面加载完成
-    tab.wait.load_start() 
-
-    try:
-        tab.ele("tag:span@@text()=我知道了").click()
-    except:
-        pass
-
-    # 整个开票表单
-    blue_invoice_ele=tab.ele('@class=blue-invoice')
-
-    # 是否开票给自然人
-    is_person_ele=blue_invoice_ele.ele("tag:span@@text()=是否开票给自然人")
-    
-    if is_person:
-        is_person_ele.click()
-        try:
-            tab.ele("tag:span@@text()=我知道了").click()
-        except:
-            pass
-
-
-    form_eles=blue_invoice_ele.eles('@class=t-col t-col-6')
-    
-    # 填写购买方信息
-    input_eles=form_eles[0].eles('.t-input__inner')
-    buy_content=(buy_name,buy_id,buy_address,buy_phone,buy_bank_name,buy_bank_id)
-    for i in range(6):
-        input_eles[i].input(buy_content[i])
-
-    # 填写销售方信息
-    input_eles=form_eles[1].eles('.t-input__inner')
-    a=input_eles[4]
-    
-    # 如果销售方银行名称输入框为空，则输入销售方银行名称
-    if input_eles[4].value == "" or input_eles[4].value == None:
-        input_eles[4].input(sell_bank_name)
-
-    # 如果销售方银行账号输入框为空，则输入销售方银行账号
-    if input_eles[5].value == "" or input_eles[5].value == None:
-        input_eles[5].input(sell_bank_id)
-
-
+            except Exception as e:
+                tell.send_message(task_data['wecome_id'],"出错："+str(e))
+                tell.done_task(task_data['task_id'],False,"出错",str(e))
+                tell.set_task_data(task_data['wecome_id'],{})
+                traceback.print_exc()
