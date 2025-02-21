@@ -9,23 +9,39 @@ from email.mime.text import MIMEText
 from email.mime.application import MIMEApplication
 import Config
 
+# 发送消息给客户
+def send_message(serviceid,userid,content,message_type="text"):
+    if message_type=="text":
+        try:
+            url=f"{Config.CHAT_URL}/polish"
+            payload={
+                "serviceid":serviceid,
+                "userid":userid,
+                "message":content
+            }
+            response=requests.post(url,json=payload)
+            if response.status_code==200:
+                content=response.json()["message"]
+            else:
+                print(f"请求润色失败，状态码: {response.status_code}")
+        except Exception as e:
+            print(f"润色失败，错误: {e}")
 
-def send_message(recipient,content,type="text"):
-
-    url = f"{Config.API_URL}/redis/message"
+    url = f"{Config.API_URL}/message/send"
     payload = {
-        'key':"make_invoice_message",
-        'type': type,
-        'recipient': recipient,
+        'serviceid':serviceid,
+        'userid': userid,
+        'type': message_type,
         'content': content,
     }
 
     response = requests.post(url, data=payload)
     if response.status_code == 200:
-        print(f"消息发送成功，recipient:{recipient},content:{content}")
+        print(f"消息发送成功，userid:{userid},content:{content}")
     else:
         print(f"请求失败，状态码: {response.status_code}")
 
+# 将文件转为url
 def up_file(file_path,file_name):
     url = f"{Config.API_URL}/file"
 
@@ -39,6 +55,36 @@ def up_file(file_path,file_name):
     except Exception as e:
         print(f"上传文件失败：{e}")
     return file_url    
+
+
+# 获取用户数据
+def get_user_data(userid:str):
+    url=f"{Config.API_URL}/user/{userid}"
+    response=requests.get(url)
+    response_data=response.json()
+    return response_data["data"]
+  
+
+
+# 补充数据
+def supplementary_data(userid:str,data:dict):
+
+    user_data=get_user_data(userid)
+    print(user_data)
+    if "admin" in userid:
+        userid=user_data["PuppetID"]
+        user_data=get_user_data(userid)
+
+ 
+    data["uscid"]=user_data["UscID"]
+    data["dsj_username"]=user_data["DsjUsername"]
+    data["dsj_password"]=user_data["DsjPassword"]
+    data["company_name"]=user_data["CompanyName"]
+    data["sell_bank_name"]=user_data["BankName"]
+    data["sell_bank_id"]=user_data["BankID"]
+    return data
+
+
 
 # 修改任务状态为进行中
 def ing_task(id:str):
@@ -58,29 +104,52 @@ def done_task(id:str,succeed:bool,msg:str=None,data:dict=None):
         print(f"donetask 失败：{response.text}")
 
 
-
-# 使用手机号搜索对应的任务输入数据
-def get_task_data(phone:str):
-    params={"key":"make_invoice_"+phone}
+# 获取记忆
+def get_memory(userid:str):
+    params={"key":"memory_"+userid}
     response=requests.get(f"{Config.API_URL}/redis/value",params=params)
 
     if response.status_code==200:
         response=response.json()
-        response=json.loads(response.get("data",{}))
+        response=json.loads(response.get("data","{}"))
         return response
     else:
-        print(f"get_task_data 失败：{response.text}")
+        print(f"获取记忆失败：{response.text}")
         return {}
     
-# 修改任务数据
-def set_task_data(phone:str,data:dict):
-    data={"key":"make_invoice_"+phone,"value":json.dumps(data)}
+# 修改记忆
+#key：开票信息 或 开票项目编码列表
+def set_memory(userid:str,key:str,value:str|dict):
+    if isinstance(value,dict):  
+        value=json.dumps(value,ensure_ascii=False)
+    
+    memory_data=get_memory(userid)
+    memory_data[key]=value
+    memory_data=json.dumps(memory_data,ensure_ascii=False)
+    data={"key":"memory_"+userid,"value":memory_data}
     response=requests.post(f"{Config.API_URL}/redis/value",json=data)
     if response.status_code==200:
         return True
     else:
-        print(f"set_task_data 失败：{response.text}")
+        print(f"修改记忆失败：{response.text}")
         return False
+# 清空记忆
+def clear_memory(userid:str):
+    memory_data=get_memory(userid)
+
+    if "开票信息" in memory_data:
+        del memory_data["开票信息"]
+    if "开票项目编码列表" in memory_data:
+        del memory_data["开票项目编码列表"]
+
+    data={"key":"memory_"+userid,"value":json.dumps(memory_data,ensure_ascii=False)}
+    response=requests.post(f"{Config.API_URL}/redis/value",json=data)
+    if response.status_code==200:
+        return True
+    else:
+        print(f"清空记忆失败：{response.text}")
+        return False
+
 
 
 

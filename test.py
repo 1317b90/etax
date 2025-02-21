@@ -38,7 +38,7 @@ if __name__ == "__main__":
         # 单位
         invoice_unit="",
         # 数量
-        invoice_num="",
+        invoice_num="8",
         # 单价
         invoice_price="",
         # 金额

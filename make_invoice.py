@@ -1,10 +1,11 @@
 # 导入
 import random
 import time
+import traceback
 from DrissionPage import Chromium, ChromiumOptions, SessionPage
 import ddddocr
 from DrissionPage.common import Settings
-
+import os
 import Config
 
 #设置找不到元素时，抛出异常
@@ -16,6 +17,7 @@ Settings.raise_when_wait_failed = True
 #设置单例化标签页对象
 Settings.singleton_tab_obj = True
 
+# Settings.set_language('zh_cn')  # 设置为中文时，填入'zh_cn'
 
 def main(
     uscid,  # 税号
@@ -24,7 +26,7 @@ def main(
     buy_name,  # 购买方名称
     invoice_name,  # 项目名称
     invoice_amount,  # 金额
-    invoice_type="普通发票",  # 发票类型
+    invoice_type,  # 发票类型
 
     
     buy_id="",  # 购买方ID
@@ -44,8 +46,9 @@ def main(
     is_preview=True,  # 是否预览
     
     # 装饰参数
-    wecome_id=None, # 企业微信ID
-    task_id=None, # 任务ID
+    userid=None, # 企业微信ID
+    serviceid=None, #客服id
+    taskid=None, # 任务ID
     buy_email=None, # 购买方邮箱
     company_name=None, # 销售方公司名称
 ):
@@ -53,11 +56,14 @@ def main(
     # ——————————加载页面————————————————————加载页面————————————————————加载页面————————————————————加载页面————————————————————加载页面——————————
     co = ChromiumOptions()
     co.set_timeouts(base=Config.TIMEOUTS)
-
+    # 无头模式
+    # co.set_argument('--incognito')
+    # co.set_argument('--no-sandbox');
+    # co.headless()
 
 
     # 连接浏览器
-    browser = Chromium()  
+    browser = Chromium(co)  
     try:
         # 获取标签页对象
         tab = browser.latest_tab  
@@ -186,17 +192,12 @@ def main(
 
 
         # 填写发票信息
-        t_table_ele=tab.ele('@class=t-table__body')
-
-        invoice_tr_ele=t_table_ele.ele('@tag()=tr')
-        # 开票信息输入框
-        input_eles=invoice_tr_ele.eles('@tag()=input')
-
+        xmmc_ele=tab.ele("@class=xmmc_handle")
 
         # 如果不是自带编码
         if invoice_code == "":
             # 点击填写项目名称按钮
-            invoice_tr_ele.ele('@tag()=button',timeout=10).click()
+            xmmc_ele.ele('@tag()=button').click()
 
             Config.wait()
 
@@ -236,7 +237,7 @@ def main(
         # 如果自带编码
         else:
             # 单击项目名称输入框，弹出“自行选择商品编码”
-            input_eles[1].click()
+            xmmc_ele.ele('@tag()=input').click()
 
             Config.wait()
 
@@ -269,21 +270,19 @@ def main(
             # 点击确定
             tab.ele("@@class=t-button__text@@text()=保存并带入当前行").click()
 
-            
-            # 自带编码确认后，需要重新获取一遍发票信息组件
-
-            t_table_ele=tab.ele('@class=t-table__body')
-            invoice_tr_ele=t_table_ele.ele('@tag()=tr')
-            input_eles=invoice_tr_ele.eles('@tag()=input')
-
         Config.wait()
-        
+
         # 依次填写规格型号、单位、数量、单价、金额
         invoice_values=(invoice_model,invoice_unit,invoice_num,invoice_price,invoice_amount)
+
+        xmmc_ele.ele('@tag()=input').click()
+        tab.actions.key_down('TAB')
+
         for i in range(5):
+            tab.actions.key_down('TAB')
             if invoice_values[i] != "":
-                time.sleep(Config.TIMEWAIT/2)
-                input_eles[i+2].input(invoice_values[i])
+                time.sleep(Config.TIMEWAIT)
+                tab.actions.type(invoice_values[i])
 
         Config.wait()
 
@@ -309,20 +308,40 @@ def main(
             # 不需要预览，直接开具发票
             footer_buttons[2].click()
             Config.wait()
-            try:
-                down_ele=tab.ele('@@class=t-button__text@@text()=发票下载PDF')
-                down_ele.wait.has_rect()
-            
-                mission = down_ele.click.to_download(save_path='./files', rename="invoice.pdf")
-                mission.wait()
-            except:
+
+            def download_invoice():
+                try:
+                    down_ele=tab.ele('@@class=t-button__text@@text()=发票下载PDF')
+                    down_ele.wait.has_rect()
+                    mission = down_ele.click.to_download(save_path='./files', rename="invoice.pdf")
+                    mission.wait()
+
+                    return os.path.exists('./files/invoice.pdf')
+                except:
+                    return False
+
+            for _ in range(3):
+                if download_invoice():
+                    break
+                else:
+                    # 重新找到下载按钮
+
+                    # 访问复制开票页面
+                    tab.get('https://dppt.guangdong.chinatax.gov.cn:8443/blue-invoice-makeout/invoice-copy')
+                    tab.wait.load_start() 
+                    Config.wait()
+                    table_ele=tab.ele('@class=operate-button-group__table').ele('@class=t-table__body')
+                    td_eles=table_ele.eles('@tag()=td')
+                    td_eles[-1].ele('tag:span@@text()=交付').click()
+
+            else:
                 raise Exception("开票成功，但下载发票文件失败")
- 
             raise Exception("开票完成")
     except Exception as e:
+        traceback.print_exc()
         raise Exception(e)
     finally:
-        
+        # pass
         browser.quit() 
 
 # 完成登录验证

@@ -1,4 +1,4 @@
 DrissionPage==4.1.0.14
-ddddocr
-redis
-Pillow
+ddddocr== 1.5.6
+redis== 5.2.1
+Pillow==11.1.0
