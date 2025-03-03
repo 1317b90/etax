@@ -1,10 +1,9 @@
 import time
 
 API_URL="https://test.g4b.cn/rpa/api"
-CHAT_URL="https://test.g4b.cn/rpa/redis"
+# CHAT_URL="https://test.g4b.cn/rpa/redis"
 # API_URL="http://127.0.0.1:8080"
-# CHAT_URL="http://127.0.0.1:8000"
-
+CHAT_URL="http://127.0.0.1:8000"
 
 REDIS_URL="114.132.45.130"
 REDIS_DB=80

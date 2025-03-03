@@ -7,6 +7,7 @@ import ddddocr
 from DrissionPage.common import Settings
 import os
 import Config
+import models
 
 #设置找不到元素时，抛出异常
 Settings.raise_when_ele_not_found = True
@@ -18,39 +19,8 @@ Settings.raise_when_wait_failed = True
 Settings.singleton_tab_obj = True
 
 # Settings.set_language('zh_cn')  # 设置为中文时，填入'zh_cn'
-
 def main(
-    uscid,  # 税号
-    dsj_username,  # 用户名
-    dsj_password,  # 密码
-    buy_name,  # 购买方名称
-    invoice_name,  # 项目名称
-    invoice_amount,  # 金额
-    invoice_type,  # 发票类型
-
-    
-    buy_id="",  # 购买方ID
-    buy_address="",  # 购买方地址
-    buy_phone="",  # 购买方电话
-    buy_bank_name="",  # 购买方银行名称
-    buy_bank_id="",  # 购买方银行账号
-    sell_bank_name="",  # 销售方银行名称
-    sell_bank_id="",  # 销售方银行账号
-    
-    invoice_model="",  # 规格型号
-    invoice_unit="",  # 单位
-    invoice_num="",  # 数量
-    invoice_price="",  # 单价
- 
-    invoice_code="",  # 项目编码
-    is_preview=True,  # 是否预览
-    
-    # 装饰参数
-    userid=None, # 企业微信ID
-    serviceid=None, #客服id
-    taskid=None, # 任务ID
-    buy_email=None, # 购买方邮箱
-    company_name=None, # 销售方公司名称
+    data:models.Execute,
 ):
 
     # ——————————加载页面————————————————————加载页面————————————————————加载页面————————————————————加载页面————————————————————加载页面——————————
@@ -86,7 +56,7 @@ def main(
             # 第一次登录不刷新页面，后续登录需要刷新
             is_refresh = attempt > 0
             
-            if login(det, tab, uscid, dsj_username, dsj_password, is_refresh):
+            if login(det, tab, data.uscid, data.dsj_username, data.dsj_password, is_refresh):
                 break
         else:
             raise Exception("多次登录失败")
@@ -115,7 +85,7 @@ def main(
         is_person=False  # 是否个人
 
         # 假如名字小于4个字，则认为是个人
-        if len(buy_name)<=4:
+        if len(data.buy_name)<=4:
             is_person=True
 
         # 等待票类选择框出现
@@ -127,10 +97,10 @@ def main(
         for _ in range(4):
             tab.actions.key_down('TAB')
 
-        if invoice_type == "普通发票":
+        if data.invoice_type == "普通发票":
             tab.actions.key_down('DOWN')
             tab.actions.key_down('DOWN')
-        elif invoice_type == "增值税专用发票":
+        elif data.invoice_type == "增值税专用发票":
             tab.actions.key_down('DOWN')
             # 增值税发票不可选自然人
             is_person=False
@@ -174,7 +144,7 @@ def main(
         
         # 填写购买方信息
         input_eles=form_eles[0].eles('.t-input__inner')
-        buy_content=(buy_name,buy_id,buy_address,buy_phone,buy_bank_name,buy_bank_id)
+        buy_content=(data.buy_name,data.buy_id,data.buy_address,data.buy_phone,data.buy_bank_name,data.buy_bank_id)
         for i in range(6):
             input_eles[i].input(buy_content[i])
 
@@ -184,18 +154,18 @@ def main(
         
         # 如果销售方银行名称输入框为空，则输入销售方银行名称
         if input_eles[4].value == "" or input_eles[4].value == None:
-            input_eles[4].input(sell_bank_name)
+            input_eles[4].input(data.sell_bank_name)
 
         # 如果销售方银行账号输入框为空，则输入销售方银行账号
         if input_eles[5].value == "" or input_eles[5].value == None:
-            input_eles[5].input(sell_bank_id)
+            input_eles[5].input(data.sell_bank_id)
 
 
         # 填写发票信息
         xmmc_ele=tab.ele("@class=xmmc_handle")
 
         # 如果不是自带编码
-        if invoice_code == "":
+        if data.invoice_code == "":
             # 点击填写项目名称按钮
             xmmc_ele.ele('@tag()=button').click()
 
@@ -210,7 +180,7 @@ def main(
             form_ele=right_ele.ele('@class=search-control-panel t-form')
 
             # 填写项目名称
-            form_ele.ele('@class=t-input__inner').input(invoice_name)
+            form_ele.ele('@class=t-input__inner').input(data.invoice_name)
 
             # 搜索
             form_ele.ele('tag:span@@text()=查询').click()
@@ -236,7 +206,7 @@ def main(
         
         # 如果自带编码
         else:
-            # 单击项目名称输入框，弹出“自行选择商品编码”
+            # 单击项目名称输入框，弹出"自行选择商品编码"
             xmmc_ele.ele('@tag()=input').click()
 
             Config.wait()
@@ -252,8 +222,8 @@ def main(
             left_container_ele=tab.ele("@class=left-container")
             left_input_eles=left_container_ele.eles('@tag()=input')
 
-            left_input_eles[1].input(invoice_name)
-            left_input_eles[2].input(invoice_code)
+            left_input_eles[1].input(data.invoice_name)
+            left_input_eles[2].input(data.invoice_code)
 
             # 等待并点击匹配的编码
             tab.wait.eles_loaded('@class=auto-complete__item')
@@ -273,7 +243,7 @@ def main(
         Config.wait()
 
         # 依次填写规格型号、单位、数量、单价、金额
-        invoice_values=(invoice_model,invoice_unit,invoice_num,invoice_price,invoice_amount)
+        invoice_values=(data.invoice_model,data.invoice_unit,data.invoice_num,data.invoice_price,data.invoice_amount)
 
         xmmc_ele.ele('@tag()=input').click()
         tab.actions.key_down('TAB')
@@ -294,7 +264,7 @@ def main(
 
 
         # 如果需要预览
-        if is_preview:
+        if data.is_preview:
             # 点击预览发票
             footer_buttons[1].click()
             Config.wait()
@@ -342,8 +312,7 @@ def main(
         raise Exception(e)
     finally:
         # pass
-        browser.quit() 
-
+        browser.quit()
 # 完成登录验证
 def login_yzm(det,tab,is_save=False):
     # 获取验证码元素

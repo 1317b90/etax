@@ -10,22 +10,24 @@ from email.mime.application import MIMEApplication
 import Config
 
 # 发送消息给客户
-def send_message(serviceid,userid,content,message_type="text"):
-    if message_type=="text":
+def send_message(serviceid,userid,adminid,content,message_type="text"):
+    # 如果是管理员或者群聊消息
+    if adminid:
+        userid=adminid
+
+    # 如果是文本消息，并且不是管理员，则进行润色
+    if message_type=="text" and not adminid:
         try:
-            url=f"{Config.CHAT_URL}/polish"
-            payload={
-                "serviceid":serviceid,
-                "userid":userid,
-                "message":content
-            }
-            response=requests.post(url,json=payload)
+            url=f"{Config.CHAT_URL}/polish?message={content}"
+            response=requests.get(url)
             if response.status_code==200:
                 content=response.json()["message"]
             else:
                 print(f"请求润色失败，状态码: {response.status_code}")
         except Exception as e:
             print(f"润色失败，错误: {e}")
+
+    # 如果是文件，则发送到了群聊
 
     url = f"{Config.API_URL}/message/send"
     payload = {
@@ -39,7 +41,7 @@ def send_message(serviceid,userid,content,message_type="text"):
     if response.status_code == 200:
         print(f"消息发送成功，userid:{userid},content:{content}")
     else:
-        print(f"请求失败，状态码: {response.status_code}")
+        print(f"请求失败: {response.text}")
 
 # 将文件转为url
 def up_file(file_path,file_name):
@@ -62,29 +64,9 @@ def get_user_data(userid:str):
     url=f"{Config.API_URL}/user/{userid}"
     response=requests.get(url)
     response_data=response.json()
+    if "data" not in response_data.keys():
+        raise Exception("该用户不存在")
     return response_data["data"]
-  
-
-
-# 补充数据
-def supplementary_data(userid:str,data:dict):
-
-    user_data=get_user_data(userid)
-    print(user_data)
-    if "admin" in userid:
-        userid=user_data["PuppetID"]
-        user_data=get_user_data(userid)
-
- 
-    data["uscid"]=user_data["UscID"]
-    data["dsj_username"]=user_data["DsjUsername"]
-    data["dsj_password"]=user_data["DsjPassword"]
-    data["company_name"]=user_data["CompanyName"]
-    data["sell_bank_name"]=user_data["BankName"]
-    data["sell_bank_id"]=user_data["BankID"]
-    return data
-
-
 
 # 修改任务状态为进行中
 def ing_task(id:str):
@@ -116,13 +98,12 @@ def get_memory(userid:str):
     else:
         print(f"获取记忆失败：{response.text}")
         return {}
-    
+
 # 修改记忆
 #key：开票信息 或 开票项目编码列表
-def set_memory(userid:str,key:str,value:str|dict):
-    if isinstance(value,dict):  
+def set_memory(userid:str,key:str,value):
+    if isinstance(value,dict):
         value=json.dumps(value,ensure_ascii=False)
-    
     memory_data=get_memory(userid)
     memory_data[key]=value
     memory_data=json.dumps(memory_data,ensure_ascii=False)
