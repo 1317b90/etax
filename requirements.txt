@@ -3,3 +3,4 @@ ddddocr== 1.5.6
 redis== 5.2.1
 Pillow==11.1.0
 pydantic
+pyperclip==1.9.0

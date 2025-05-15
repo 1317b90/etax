@@ -6,8 +6,12 @@ from DrissionPage import Chromium, ChromiumOptions, SessionPage
 import ddddocr
 from DrissionPage.common import Settings
 import os
+
+import pyperclip
 import Config
 import models
+from tell import ai_query_code
+from DrissionPage.common import Keys
 
 #设置找不到元素时，抛出异常
 Settings.raise_when_ele_not_found = True
@@ -150,8 +154,7 @@ def main(
 
         # 填写销售方信息
         input_eles=form_eles[1].eles('.t-input__inner')
-        a=input_eles[4]
-        
+
         # 如果销售方银行名称输入框为空，则输入销售方银行名称
         if input_eles[4].value == "" or input_eles[4].value == None:
             input_eles[4].input(data.sell_bank_name)
@@ -164,8 +167,46 @@ def main(
         # 填写发票信息
         xmmc_ele=tab.ele("@class=xmmc_handle")
 
+        # 自带编码的函数
+        def have_invoice_code():
+            # 单击项目名称输入框，弹出"自行选择商品编码"
+            xmmc_ele.ele('@tag()=input').click()
+
+            Config.wait()
+
+            # 等待并点击自行选择商品编码
+            tab.wait.eles_loaded('@class=auto-complete__handle')
+            tab.ele("@class=auto-complete__handle").click()
+
+            Config.wait()
+
+            # 等待左侧容器加载完成
+            tab.wait.eles_loaded('@class=left-container')
+            left_container_ele=tab.ele("@class=left-container")
+            left_input_eles=left_container_ele.eles('@tag()=input')
+
+            left_input_eles[1].input(data.invoice_name)
+            left_input_eles[2].input(data.invoice_code)
+
+            # 等待并点击匹配的编码
+            tab.wait.eles_loaded('@class=auto-complete__item')
+            tab.ele('@class=auto-complete__item').click()
+
+            # 找到税率
+            left_input_eles[2].click()
+            for _ in range(6):
+                time.sleep(Config.TIMEWAIT)
+                tab.actions.key_down('TAB')
+
+            tab.actions.key_down('DOWN')
+            tab.actions.key_down('ENTER')
+
+            # 点击确定
+            tab.ele("@@class=t-button__text@@text()=保存并带入当前行").click()
+
+
         # 如果不是自带编码
-        if data.invoice_code == "":
+        if not data.invoice_code:
             # 点击填写项目名称按钮
             xmmc_ele.ele('@tag()=button').click()
 
@@ -199,46 +240,20 @@ def main(
 
             # 如果搜索结果为空
             if len(td_eles) <= 1:
-                raise Exception("需查询编码")
+                # 使用AI选择编码
+                code=ai_query_code(data.invoice_name)
+                if code:
+                    data.invoice_code=code
+                    have_invoice_code()
+                else:
+                    raise Exception("需查询编码")
             
             # 如果搜索结果存在，点击最后的选择按钮
             td_eles[-1].ele("tag:span@@text()=选择").click(by_js=True)
         
         # 如果自带编码
         else:
-            # 单击项目名称输入框，弹出"自行选择商品编码"
-            xmmc_ele.ele('@tag()=input').click()
-
-            Config.wait()
-
-            # 等待并点击自行选择商品编码
-            tab.wait.eles_loaded('@class=auto-complete__handle')
-            tab.ele("@class=auto-complete__handle").click()
-
-            Config.wait()
-
-            # 等待左侧容器加载完成
-            tab.wait.eles_loaded('@class=left-container')
-            left_container_ele=tab.ele("@class=left-container")
-            left_input_eles=left_container_ele.eles('@tag()=input')
-
-            left_input_eles[1].input(data.invoice_name)
-            left_input_eles[2].input(data.invoice_code)
-
-            # 等待并点击匹配的编码
-            tab.wait.eles_loaded('@class=auto-complete__item')
-            tab.ele('@class=auto-complete__item').click()
-
-            # 找到税率
-            left_input_eles[2].click()
-            for _ in range(6):
-                tab.actions.key_down('TAB')
-
-            tab.actions.key_down('DOWN')
-            tab.actions.key_down('ENTER')
-
-            # 点击确定
-            tab.ele("@@class=t-button__text@@text()=保存并带入当前行").click()
+            have_invoice_code()
 
         Config.wait()
 
@@ -250,9 +265,11 @@ def main(
 
         for i in range(5):
             tab.actions.key_down('TAB')
+            tab.actions.key_down('ENTER')
             if invoice_values[i] != "":
                 time.sleep(Config.TIMEWAIT)
-                tab.actions.type(invoice_values[i])
+                pyperclip.copy(str(invoice_values[i]))
+                tab.actions.type(Keys.CTRL_V)
 
         Config.wait()
 
@@ -311,7 +328,7 @@ def main(
         traceback.print_exc()
         raise Exception(e)
     finally:
-        # pass
+        #pass
         browser.quit()
 # 完成登录验证
 def login_yzm(det,tab,is_save=False):
